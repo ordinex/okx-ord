@@ -11,4 +11,4 @@ COPY --from=builder /ord/target/release/ord /usr/local/bin/
 
 RUN apt-get update && apt-get install ca-certificates -y && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["ord"]
+CMD ["/usr/local/bin/ord"]
