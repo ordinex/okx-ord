@@ -1,122 +1,40 @@
-name: CI
+name: Build and push Docker image
 
 on:
   push:
     branches:
-    - master
-  pull_request:
-    branches:
-    - master
-
-defaults:
-  run:
-    shell: bash
+      - master
 
 env:
-  RUSTFLAGS: --deny warnings
+  AWS_DEFAULT_REGION: eu-central-1
+  AWS_ACCOUNT_ID: 144594246572
+  IMAGE_NAME: ordinex/okx-ord
+  IMAGE_TAG: ${{ github.run_number }}
 
 jobs:
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-
-    - uses: peaceiris/actions-mdbook@v1
-      with:
-        mdbook-version: latest
-
-    - name: Install mdbook-linkcheck
-      run: |
-        mkdir -p mdbook-linkcheck
-        cd mdbook-linkcheck
-        wget https://github.com/Michael-F-Bryan/mdbook-linkcheck/releases/latest/download/mdbook-linkcheck.x86_64-unknown-linux-gnu.zip
-        unzip mdbook-linkcheck.x86_64-unknown-linux-gnu.zip
-        chmod +x mdbook-linkcheck
-        pwd >> $GITHUB_PATH
-
-    - run: mdbook build docs
-
-    - name: Deploy Pages
-      uses: peaceiris/actions-gh-pages@v3
-      if: github.ref == 'refs/heads/master'
-      with:
-        github_token: ${{secrets.GITHUB_TOKEN}}
-        publish_branch: gh-pages
-        publish_dir: docs/build/html
-  lint:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-    - name: Install rustfmt
-      uses: actions-rs/toolchain@v1
-      with:
-        components: rustfmt
-        override: true
-        toolchain: stable
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
 
-    - name: Install clippy nightly
-      uses: actions-rs/toolchain@v1
-      with:
-        components: clippy
-        toolchain: nightly
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
 
-    - uses: Swatinem/rust-cache@v2
-      with:
-        key: "clippy-nightly"
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Clippy
-      run: cargo +nightly clippy --all --all-targets
-
-    - name: Format
-      run: cargo fmt --all -- --check
-
-    - name: Check for Forbidden Words
-      run: |
-        sudo apt-get install ripgrep
-        ./bin/forbid
-
-  test:
-    strategy:
-      matrix:
-        os:
-        - macos-latest
-        - ubuntu-latest
-        - windows-latest
-
-    runs-on: ${{matrix.os}}
-
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Install Rust Toolchain Components
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-
-    - uses: Swatinem/rust-cache@v2
-
-    - name: Test
-      run: cargo test --all
-
-  core:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Install Rust Toolchain Components
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-
-    - uses: Swatinem/rust-cache@v2
-
-    - name: Install Bitcoin Core
-      run: ./bin/install-bitcoin-core-linux
-
-    - name: Test
-      run: cargo test --all -- --ignored
+      - name: Tag and push Docker image
+        run: |
+          docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_DEFAULT_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_DEFAULT_REGION }}.amazonaws.com/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
